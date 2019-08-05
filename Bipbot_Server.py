@@ -1,17 +1,13 @@
 import numpy as np
-import matplotlib.pyplot
-import scipy
-import scipy.stats
+import ipaddress
 import time
+
+from Bipbot_Shared import (
+Client
+)
 
 import discord
 import PyQt5
-
-def transmit(bip_status, Users):
-    for member in Users:
-
-    return True
-
 
 def bipDict(members, game, channel, guild, status):
     bip_status = {}
@@ -20,8 +16,17 @@ def bipDict(members, game, channel, guild, status):
     bip_status[channel] = channel
     bip_status[guild] = guild
     bip_status[status] = status
+    return bip_status
+
+def transmit(bip_status, Users):
+    for member in Users:
+
+    return True
 
 def bipCheck(channel):
+    """
+    Contains the logic to check whether a big bip is in progress.
+    """
     print("bipCheck start")
 
     members = [x for x in channel.members
@@ -47,6 +52,8 @@ def bipCheck(channel):
             bip_status = self.bipDict(members, major_game, channel, guild, True)
         else:
             bip_status = self.bipDict(members, major_game, channel, guild, False)
+    else:
+        bip_status = None
 
     return bip_status
 
@@ -80,29 +87,19 @@ class bipBot(discord.Client):
         if message.content.startswith("$test"):
             await message.channel.send("fuck you")
 
-class Client:
-    def __init__(self):
-        self.name = ""
-        self.init_time = 0.0
-        self.excludes = []
-        self.Channels = []
-        self.IP = ""
-        self.port = 63504
-        self.LFB = False
-
 
 class connections:
     def __init__(self):
         self.members = []
 
-    async def ping_receive(self, ping):
-        User = Client()
+    async def update_connection(self, ping):
+        User = Client(HostType = 'server')
         User.name = ping.name
-        User.IP = ping.IP
-        User.excludes = ping.settings.excludes
-        User.Channels = ping.settings.Channels
+        User.IP = ping.sender_IP
+        User.prefs._update(ping.prefs.__dict__)
+        User.settings._update(ping.settings.__dict__)
         user.LFB = ping.LFB
-        User.init_time = time.time()
+        self.time_added = ping.time
 
         if User not in self.members:
             for c, member in enumerate(members):
