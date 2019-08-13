@@ -21,6 +21,7 @@ class BipApp(QWidget):
     def LFBAction(self, state):
 
         #change LFB state to whatever
+        return
 
     def initUI(self):
 
@@ -32,6 +33,42 @@ class BipApp(QWidget):
 
         self.show()
 
-app = QApplication(sys.argv)
-ex = BipApp()
-sys.exit(app.exec_())
+def bip_message(bip_status):
+    message = ""
+    message += str(len(bip_status[members])) + " person bip in channel "
+    message += str(bip_status[channels]) + ", playing "
+    message += str(bip_status[game])
+
+def bip_change(bip_status, prefs):
+    if (bip_status[channel] in prefs.channels):
+        if bip_status[game] in prefs.excludes:
+            icon_set("orange")
+        elif len(bip_status[members]) == 2 and bip_status[game] != 'Various':
+            icon_set("blue")
+            if settings.smol_bip and settings.alerts:
+                alert(bip_message(bip_status))
+        elif len(bip_status[members]) > 2:
+            icon_set("green")
+            if settings.alerts:
+                alert(bip_message(bip_status))
+        elif len(bip_status[members]) <2:
+            icon_set("red")
+
+class Connection(object):
+    def __init__(self, server, socket):
+        self.server = server
+        self.socket = socket
+
+    def send_client_status(self, client_status):
+        return
+
+    def recieve_server_update(self, server_update):
+        #when a packet comes via this connection
+        #async somehow
+        return
+
+
+ if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    ex = BipApp()
+    sys.exit(app.exec_())

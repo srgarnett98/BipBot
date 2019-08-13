@@ -1,70 +1,38 @@
 import numpy as np
 import time
-import ipaddress
-
-def bip_message(bip_status):
-    message = ""
-    message += str(len(bip_status[members])) + " person bip in channel "
-    message += str(bip_status[channels]) + ", playing "
-    message += str(bip_status[game])
-
-async def bip_change(bip_status, prefs):
-    if (bip_status[channel] in prefs.channels):
-        if bip_status[game] in prefs.excludes:
-            icon_set("orange")
-        elif len(bip_status[members]) == 2 and bip_status[game] != 'Various':
-            icon_set("blue")
-            if settings.smol_bip and settings.alerts:
-                alert(bip_message(bip_status))
-        elif len(bip_status[members]) > 2:
-            icon_set("green")
-            if settings.alerts:
-                alert(bip_message(bip_status))
-        elif len(bip_status[members]) <2:
-            icon_set("red")
+import copy
 
 class BaseClass(object):
-    def _update(change_dict):
+    def _update(self, change_dict):
         for change_key, change_value in change_dict.items():
-            setattr(self, change_key, change_value)
+            setattr(self, change_key, copy.deepcopy(change_value))
 
-class _Preferences(BaseClass):
-    """
-    """
-    def __init__(self):
-        self.excluded_games = []
-        self.subbed_channels = []
-        self.active_guilds = []
-        self.notifications_on = True
-
-class _Settings(BaseClass):
-    """
-    """
-    def __init__(self):
-        self.uhhhhh = False
-
-class Client_status(BaseClass):
+class Client(BaseClass):
 
     """
     dw a
     """
     def __init__(self, HostType = 'client'):
+        super().__init__()
         self.name = ""
-        self.prefs = _Preferences()
-        self.settings = _Settings()
+        self.excluded_games = []
+        self.excluded_channels = []
+        self.guilds = []
+        self.notifications = True
         self.LFB = False
+        self.IP = None
+        self.port = 65034
         if HostType == 'server':
             self.gamestate = ""
-            self.IP = None
-            self.port = 65034
             self.time_added = None
 
-class Server_status(BaseClass):
+class Server_props(BaseClass):
 
     """
     dw a
     """
     def __init__(self, HostType = 'client'):
+        super().__init__()
         self.IP = None
         self.port = 65034
 
@@ -75,11 +43,9 @@ class Server_status(BaseClass):
 
 class ping(BaseClass):
     def __init__(self, target_info, sender_info):
+        super().__init__()
         self.sender = Client_status()
         self.sender._update(sender_info.__dict__)
 
         self.target = Client_status()
         self.target._update(target_info.__dict__)
-
-class Bip_status(BaseClass):
-    def

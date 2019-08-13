@@ -1,33 +1,30 @@
 import numpy as np
 import ipaddress
 import time
+import scipy.stats
+import socket
+import json
+import sys
+import selectors
 
 from Bipbot_Shared import (
 Client
 )
 
 import discord
-import PyQt5
 
-def bipDict(members, game, channel, guild, status):
+def bipDict(members, game, channel, guild):
     bip_status = {}
     bip_status[members] = members
     bip_status[game] = game
     bip_status[channel] = channel
     bip_status[guild] = guild
-    bip_status[status] = status
     return bip_status
-
-def transmit(bip_status, Users):
-    for member in Users:
-
-    return True
 
 def bipCheck(channel):
     """
-    Contains the logic to check whether a big bip is in progress.
+    Contains the logic to get the information about a bip
     """
-    print("bipCheck start")
 
     members = [x for x in channel.members
                if (not x.bot and
@@ -48,10 +45,12 @@ def bipCheck(channel):
         if games.count(major_game) < 2:
             major_game = 'Various'
 
-        if bippers > 2 or (bippers == 2 and major_game != 'Various'):
-            bip_status = self.bipDict(members, major_game, channel, guild, True)
-        else:
-            bip_status = self.bipDict(members, major_game, channel, guild, False)
+        member_names = [member.name for member in members]
+        bip_status = self.bipDict(member_names,
+                            major_game,
+                            channel.name,
+                            channel.guild.id)
+                            #some kind of hash for the guild
     else:
         bip_status = None
 
@@ -60,56 +59,100 @@ def bipCheck(channel):
 
 class bipBot(discord.Client):
     def __init__(self):
-        self.connected = connections()
+        super().__init__()
+        self.connected = []
+        self.channels = []
+
+        self.loop.create_task(self.open_listen())
 
 
+    def transmit(self, bip_status):
+        for user in self.connected:
+            if bip_status[guild] in user.prefs.guilds:
+                user.send_bip_status(bip_status)
+        return
 
     async def on_group_join(self, channel, user):
-            bip_status = bipCheck(channel)
-            transmit(bip_status, self.connected.members)
+        bip_status = bipCheck(channel)
+        transmit(bip_status)
+        return
+
     async def on_group_leave(self, channel, user):
+        bip_status = bipCheck(channel)
+        transmit(bip_status)
+        return
+
+    async def every_5_mins(self, channel):
+        while True:
+            await time.sleep(300)
             bip_status = bipCheck(channel)
-            transmit(bip_status, self.connected.members)
+            transmit(bip_status)
+        return
 
     async def on_ready(self):
-        #code to run on first time startup
         print("ready")
 
-        #load settings
-
-        #Load gang members
-
-        #Load Chat commands
-
     async def on_message(self, message):
-        #code to run when a message is sent to chat
-
         if message.content.startswith("$test"):
             await message.channel.send("fuck you")
+        elif message.content.startswith("$bipcheck"):
+            bip_status = bipCheck(message.channel)
+            await message.channel.send(str(bip_status.members))
+
+        return True
+
+    async def open_listen(self):
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket.bind(('', 65043))
+        self.socket.listen()
+        self.socket.setblocking(False)
+
+        def create_new_connection(conn, addr):
+            ping_size = conn.recv(1)
+            ping_size = int.from_bytes(ping_size, byteorder = 'little')
+            client_ping = json.loads(conn.recv(ping_size).decode('UTF-8'))
+            client = ping_to_client(client_ping)
+            client.IP, client.port = addr
+            client.time_added = time.time()
+
+            return Connection(client, conn)
+
+        while True:
+            conn, addr = await self.loop.sock_accept(self.socket)
+            self.connected.append(create_new_connection(conn, addr))
+
+class Connection(object):
+    def __init__(self, client, socket):
+        self.User = client
+        self.socket = socket
+
+    def send_bip_status(self, bip_status):
+        bip_json = json.dumps(bip_status)
+        bip_json_size = bytes(sys.getsizeof(bip_json))
+        self.socket.sendall(bip_json_size)
+        self.socket.sendall(bip_json)
+        return True
+
+    def recieve_user_update(self, ping_size):
+        ping_size = conn.recv(1)
+        ping_size = int.from_bytes(ping_size, byteorder = 'little')
+        client_ping = json.loads(conn.recv(ping_size).decode('UTF-8'))
+        self.User._update(client_ping)
+        return True
+
+def ping_to_client(ping):
+    client = Client(HostType = 'server')
+    client._update(ping)
+
+    return client
 
 
-class connections:
-    def __init__(self):
-        self.members = []
+def main():
 
-    async def update_connection(self, ping):
-        User = Client(HostType = 'server')
-        User.name = ping.name
-        User.IP = ping.sender_IP
-        User.prefs._update(ping.prefs.__dict__)
-        User.settings._update(ping.settings.__dict__)
-        user.LFB = ping.LFB
-        self.time_added = ping.time
+    server = bipBot()
+    with open('hash.txt', 'r') as file:
+        bipbot_hash = file.readline().strip()
+    server.run(bipbot_hash)
 
-        if User not in self.members:
-            for c, member in enumerate(members):
-                if member.IP == User.IP and member.port == User.port:
-                    members.remove(c)
-            self.members.append(User)
-
-
-
-
-
-bipBot = bipBot()
-bipBot.run("NTcyMDA2NjM2NDIwNDY0NjQw.XMWH1Q.sLvRAf_9UktYaH_u_9eQ_Nk-Rwc")
+if __name__ == "__main__":
+    main()
