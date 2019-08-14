@@ -6,32 +6,36 @@ import socket
 import json
 import sys
 import selectors
+import asyncio
 
 from Bipbot_Shared import (
-Client
+Client,
+BipStatus
 )
 
 import discord
 
-def bipDict(members, game, channel, guild):
-    bip_status = {}
-    bip_status[members] = members
-    bip_status[game] = game
-    bip_status[channel] = channel
-    bip_status[guild] = guild
-    return bip_status
-
 def bipCheck(channel):
-    """
+    '''
     Contains the logic to get the information about a bip
-    """
 
+    params:
+    -------
+
+        channel: discord.voice_channel object
+            The voice channel which a bip is being checked for
+
+    returns:
+    -------
+
+        bip_status: BipStatus object
+            A BipStatus struct describing the bip
+    '''
     members = [x for x in channel.members
                if (not x.bot and
-                   not x.VoiceState.mute and
-                   not x.VoiceState.self_mute)]
+                   not x.voice.mute and
+                   not x.voice.self_mute)]
     if len(members) !=0:
-        print(members)
 
         bippers = len(members)
 
@@ -41,52 +45,110 @@ def bipCheck(channel):
                 games.append(member.activities[0].name)
             except:
                 games.append("Chatting")
-        major_game = scipy.stats.mode(games)
-        if games.count(major_game) < 2:
+        major_game = scipy.stats.mode(games).mode[0]
+        if games.count(major_game) < 2 and len(members) > 1:
             major_game = 'Various'
 
         member_names = [member.name for member in members]
-        bip_status = self.bipDict(member_names,
+        bip_status = BipStatus(member_names,
                             major_game,
                             channel.name,
+                            channel.id,
+                            channel.guild.name,
                             channel.guild.id)
                             #some kind of hash for the guild
     else:
-        bip_status = None
+        bip_status = BipStatus([],
+                             None,
+                             channel.name,
+                             channel.id,
+                             channel.guild.name,
+                             channel.guild.id)
 
     return bip_status
 
 
 class bipBot(discord.Client):
-    def __init__(self):
+    '''
+    BipBot discord client, inherits from discord.Client
+
+    params:
+    ---------
+
+        port: int
+            the port which the program recieves new connections on
+
+    Attributes:
+    ---------
+
+        connected: list of Connection objects
+            A list of connected users, represented by their Connection objects.
+            Connected user details can be found by connected[i].User
+
+        listen_port: int
+            the port which the program recieves new connections on
+
+    Methods:
+    ---------
+        transmit( bip_status : BipStatus object)
+            transmits a bip status change to all necessary parties
+
+        async on_ready:
+            Code to run when the bot has first set up
+
+        async on_message( message : discord.message object)
+            Code to run on message in a text channel. This is hwere to add text
+            commands
+
+        async on_group_join( channel : discord.voice_channel object,
+                              user: discord.User object)
+            When a user joins, rechecks the bip status, and then transmits that
+            out
+
+        async on_group_leave( channel : discord.voice_channel object,
+                              user: discord.User object)
+            When a user leave, rechecks the bip status, and then transmits that
+            out
+
+        async every_5_mins( channel : discord.voice_channel object)
+            When a new user joins, rechecks the bip status, and then transmits that
+            out
+
+        async open_listen:
+            creates a socket which is listening on all IPs for new connections.
+            When a connection is formed, it forms a Connection object for that user
+            and adds it to the connected list
+
+    '''
+    def __init__(self, port):
         super().__init__()
         self.connected = []
-        self.channels = []
-
+        self.listen_port = port
         self.loop.create_task(self.open_listen())
 
 
     def transmit(self, bip_status):
         for user in self.connected:
-            if bip_status[guild] in user.prefs.guilds:
+            if bip_status.channel in user.channels:
                 user.send_bip_status(bip_status)
         return
 
     async def on_group_join(self, channel, user):
         bip_status = bipCheck(channel)
-        transmit(bip_status)
+        transmit(bip_status.__dict__)
         return
 
     async def on_group_leave(self, channel, user):
         bip_status = bipCheck(channel)
-        transmit(bip_status)
+        transmit(bip_status.__dict__)
         return
 
-    async def every_5_mins(self, channel):
-        while True:
-            await time.sleep(300)
-            bip_status = bipCheck(channel)
-            transmit(bip_status)
+    async def every_5_mins(self):
+        await asyncio.sleep(300)
+        for guild in self.guilds:
+            for channel in guild.voice_channels:
+                bip_status = bipCheck(channel)
+                transmit(bip_status.__dict__)
         return
 
     async def on_ready(self):
@@ -96,14 +158,17 @@ class bipBot(discord.Client):
         if message.content.startswith("$test"):
             await message.channel.send("fuck you")
         elif message.content.startswith("$bipcheck"):
-            bip_status = bipCheck(message.channel)
-            await message.channel.send(str(bip_status.members))
-
+            for voice_channel in message.channel.guild.voice_channels:
+                bip_status = bipCheck(voice_channel)
+                await message.channel.send(bip_status.__dict__)
+        elif message.content.startswith("$connected"):
+            for user in self.connected:
+                await message.channel.send(user.name)
         return True
 
     async def open_listen(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket.bind(('', 65043))
+        self.socket.bind(('', self.listen_port))
         self.socket.listen()
         self.socket.setblocking(False)
 
@@ -113,34 +178,117 @@ class bipBot(discord.Client):
             client_ping = json.loads(conn.recv(ping_size).decode('UTF-8'))
             client = ping_to_client(client_ping)
             client.IP, client.port = addr
-            client.time_added = time.time()
 
-            return Connection(client, conn)
+            return Connection(client, conn, self.loop, self.guilds)
 
         while True:
             conn, addr = await self.loop.sock_accept(self.socket)
             self.connected.append(create_new_connection(conn, addr))
 
 class Connection(object):
-    def __init__(self, client, socket):
-        self.User = client
+    '''
+    Object which holds a users socket connection and their details. Is constantly
+    listening for messages on this socket.
+
+    Params / Attributes:
+    --------
+
+        User: Client object
+            The details of the client, created by ping_to_client in the initial
+            message
+
+        socket: socket.socket object
+            The socket between the client and the server
+
+        event_loop: asyncio.event_loop object, belonging to BipBot/discord.Client
+            The discord clients event loop, such that the open listening can be
+            added as an async event
+
+        guilds: list of discord.guild objects
+            A list of the guilds which BipBot has permissions on. This is super
+            dumb and will be changed when I remember how to pass stuff through
+            properly
+
+    Methods:
+    ---------
+
+        send_data( data : any form)
+            Sends whatever data is passed to it as a json to the client. Prefaces
+            this with a 64 bit int representation of how many bytes (bits? idk)
+            the client should be expecting. 64 bit int is way over the top, but
+            its 64 bits, idgaf
+
+        send_guild_channel_ids( guild_id : int)
+            Uses the bipbots guilds to find the channel ids of all voice channels
+            under that guilds. Then sends these channel ids to the user.
+
+            Plan on the user using bipbot to find the guild ID, then using this
+            function to find the channel ids under it
+
+        async recieve_user_message
+            Constantly listens for a message from a user, and then acts upon it.
+            Is likely to have a massive string of if commands downstream of this
+            to determine what the user wants
+    '''
+    def __init__(self, User, socket, event_loop, guilds):
+        self.User = User
         self.socket = socket
+        self.socket.setblocking(False)
+        self.event_loop = event_loop
+        self.guilds = guilds
+        self.event_loop.create_task(self.recieve_user_message())
+        self.send_data('ready')
 
-    def send_bip_status(self, bip_status):
-        bip_json = json.dumps(bip_status)
-        bip_json_size = bytes(sys.getsizeof(bip_json))
-        self.socket.sendall(bip_json_size)
-        self.socket.sendall(bip_json)
+    def send_data(self, data):
+        data = json.dumps(data)
+        length = (sys.getsizeof(data)).to_bytes(8, byteorder = 'big')
+        self.socket.sendall(length)
+        self.socket.sendall(bytes(data, 'UTF-8'))
         return True
 
-    def recieve_user_update(self, ping_size):
-        ping_size = conn.recv(1)
-        ping_size = int.from_bytes(ping_size, byteorder = 'little')
-        client_ping = json.loads(conn.recv(ping_size).decode('UTF-8'))
-        self.User._update(client_ping)
+    def send_guild_channel_ids(self, guild_id):
+        for guild in self.guilds:
+            voice_ids = {}
+            if guild.id == guild_id:
+                for voice_channel in guild.voice_channels:
+                    voice_ids[voice_channel.name] = voice_channel.id
+        if voice_ids == {}:
+            voice_ids = None
+        self.send_data(voice_ids)
+
         return True
+
+    async def recieve_user_message(self):
+        try:
+            self.socket.setblocking(False)
+            ping_size = await self.event_loop.sock_recv(self.socket, 8)
+            ping_size = int.from_bytes(ping_size, byteorder = 'big')
+            print(ping_size)
+            client_ping = await self.event_loop.sock_recv(self.socket,
+                                                          ping_size)
+            client_ping = json.loads(client_ping.decode('UTF-8'))
+            print(client_ping)
+            if 'get_channels_of_guild' in client_ping:
+                self.send_guild_channel_ids(client_ping['get_channels_of_guild'])
+                print('sent channel ids')
+            else:
+                print('went wrong way')
+                self.User._update(client_ping)
+                print(self.User)
+            self.event_loop.create_task(self.recieve_user_message())
+            print('recieve done')
+        except Exception:
+            print('connection closed')
+        finally:
+            return True
 
 def ping_to_client(ping):
+    '''
+    converts a ping consisting of a dict of the users attributes, into a new
+    Client object.
+
+    Placeholder
+    '''
     client = Client(HostType = 'server')
     client._update(ping)
 
@@ -148,11 +296,19 @@ def ping_to_client(ping):
 
 
 def main():
+    try:
+        server = bipBot(port = 65014)
+        with open('hash.txt', 'r') as file:
+            bipbot_hash = file.readline().strip()
+        server.run(bipbot_hash)
+    except Exception:
+        import traceback as tb
+        tb.print_exc(Exception)
 
-    server = bipBot()
-    with open('hash.txt', 'r') as file:
-        bipbot_hash = file.readline().strip()
-    server.run(bipbot_hash)
+    finally:
+        server.socket.close()
+        for connection in server.connected:
+            connection.socket.close()
 
 if __name__ == "__main__":
     main()
