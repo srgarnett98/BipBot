@@ -173,8 +173,8 @@ class bipBot(discord.Client):
         self.socket.setblocking(False)
 
         def create_new_connection(conn, addr):
-            ping_size = conn.recv(1)
-            ping_size = int.from_bytes(ping_size, byteorder = 'little')
+            ping_size = conn.recv(8)
+            ping_size = int.from_bytes(ping_size, byteorder = 'big')
             client_ping = json.loads(conn.recv(ping_size).decode('UTF-8'))
             client = ping_to_client(client_ping)
             client.IP, client.port = addr
@@ -247,11 +247,12 @@ class Connection(object):
         return True
 
     def send_guild_channel_ids(self, guild_id):
+        voice_ids = {}
         for guild in self.guilds:
-            voice_ids = {}
             if guild.id == guild_id:
                 for voice_channel in guild.voice_channels:
                     voice_ids[voice_channel.name] = voice_channel.id
+                voice_ids['guild_name'] = guild.name
         if voice_ids == {}:
             voice_ids = None
         self.send_data(voice_ids)
@@ -270,13 +271,9 @@ class Connection(object):
             print(client_ping)
             if 'get_channels_of_guild' in client_ping:
                 self.send_guild_channel_ids(client_ping['get_channels_of_guild'])
-                print('sent channel ids')
             else:
-                print('went wrong way')
                 self.User._update(client_ping)
-                print(self.User)
             self.event_loop.create_task(self.recieve_user_message())
-            print('recieve done')
         except Exception:
             print('connection closed')
         finally:
@@ -297,7 +294,7 @@ def ping_to_client(ping):
 
 def main():
     try:
-        server = bipBot(port = 65014)
+        server = bipBot(port = 65019)
         with open('hash.txt', 'r') as file:
             bipbot_hash = file.readline().strip()
         server.run(bipbot_hash)
