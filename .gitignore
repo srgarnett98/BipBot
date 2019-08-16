@@ -105,3 +105,5 @@ venv.bak/
 
 #additionals
 hash.txt
+config.json
+config.pickle

@@ -3,14 +3,14 @@ import ipaddress
 import time
 import scipy.stats
 import socket
-import json
+import pickle
 import sys
 import selectors
 import asyncio
 
 from Bipbot_Shared import (
-Client,
-BipStatus
+BipStatus,
+BaseClass
 )
 
 import discord
@@ -172,18 +172,19 @@ class bipBot(discord.Client):
         self.socket.listen()
         self.socket.setblocking(False)
 
-        def create_new_connection(conn, addr):
-            ping_size = conn.recv(8)
-            ping_size = int.from_bytes(ping_size, byteorder = 'big')
-            client_ping = json.loads(conn.recv(ping_size).decode('UTF-8'))
-            client = ping_to_client(client_ping)
-            client.IP, client.port = addr
-
-            return Connection(client, conn, self.loop, self.guilds)
-
         while True:
             conn, addr = await self.loop.sock_accept(self.socket)
-            self.connected.append(create_new_connection(conn, addr))
+
+            ping_size = await self.loop.sock_recv(conn, 8)
+            ping_size = int.from_bytes(ping_size, byteorder = 'big')
+            client_ping = await self.loop.sock_recv(conn, ping_size)
+            client_ping = pickle.loads(client_ping)
+            client = ping_to_client(client_ping)
+            client.IP, client.port = addr
+            print('New connection')
+            print(addr)
+
+            self.connected.append(Connection(client, conn, self.loop, self.guilds))
 
 class Connection(object):
     '''
@@ -213,7 +214,7 @@ class Connection(object):
     ---------
 
         send_data( data : any form)
-            Sends whatever data is passed to it as a json to the client. Prefaces
+            Sends whatever data is passed to it as a pickle to the client. Prefaces
             this with a 64 bit int representation of how many bytes (bits? idk)
             the client should be expecting. 64 bit int is way over the top, but
             its 64 bits, idgaf
@@ -240,10 +241,10 @@ class Connection(object):
         self.send_data('ready')
 
     def send_data(self, data):
-        data = json.dumps(data)
+        data = pickle.dumps(data)
         length = (sys.getsizeof(data)).to_bytes(8, byteorder = 'big')
         self.socket.sendall(length)
-        self.socket.sendall(bytes(data, 'UTF-8'))
+        self.socket.sendall(data)
         return True
 
     def send_guild_channel_ids(self, guild_id):
@@ -264,11 +265,9 @@ class Connection(object):
             self.socket.setblocking(False)
             ping_size = await self.event_loop.sock_recv(self.socket, 8)
             ping_size = int.from_bytes(ping_size, byteorder = 'big')
-            print(ping_size)
             client_ping = await self.event_loop.sock_recv(self.socket,
                                                           ping_size)
-            client_ping = json.loads(client_ping.decode('UTF-8'))
-            print(client_ping)
+            client_ping = pickle.loads(client_ping)
             if 'get_channels_of_guild' in client_ping:
                 self.send_guild_channel_ids(client_ping['get_channels_of_guild'])
             else:
@@ -279,6 +278,83 @@ class Connection(object):
         finally:
             return True
 
+class Client(BaseClass):
+    '''
+    A struct containing all the relevant details of a client. If the host is a
+    server, will also contain what game they are playing, and when they were added.
+
+    Time added is for the future, when the bot contains a list of past users and
+    such so i can collect data on all my friends. WHEN I DO THIS I WILL WORK BY
+    GDPR LAWS AND ASK FOR CONSENT DW
+
+    Attributes:
+    -------
+
+        name: string
+            The users name, will be self set and disconnected from discord name
+
+        excluded_games: list of string
+            A list of which games the user doesnt want to recieve bips about
+
+        channels: list of tuple (channel name: string, channel_id: int)
+            A list of channels which the user is interested in and will recieve
+            bips for.
+
+        guilds: list of tuple (guild name: string, guild_id: int)
+            A list of the guilds which the user is interested in and will recieve
+            bips for
+
+        notifications: bool
+            If False, user will not recieve push notifications of bips
+
+        LFB: bool
+            Looking For Bip status. if enough people LFB then it will trigger a
+            bip alert
+
+        IP: string formatted as IPV4
+            The IP to which the client is on. Dont know if I need this
+
+        port: int
+            The port to which the client is on. Dont know if i need this
+
+        IF HOSTTYPE = 'SERVER':
+
+        gamestate: string
+            The game which the user is playing. WARNING: spotify may fuck this
+
+        time_added: float
+            time which the user was added to the server, for database uses.
+        '''
+    def __init__(self):
+        super().__init__()
+        self.name = ""
+        self.excluded_games = []
+        self.channels = []
+        self.guilds = []
+        self.notifications = True
+        self.LFB = False
+        self.IP = None
+        self.port = 65034
+        self.gamestate = ""
+        self.time_added = None
+
+class Channel(BaseClass):
+    def __init__(self,
+                 name,
+                 id,
+                 guild_id,
+                 big_req,
+                 smol_req,
+                 ignore,
+                 bip_status):
+        self.name = name
+        self.id = id
+        self.guild_id = guild_id
+        self.big_req = big_req
+        self.smol_req = smol_req
+        self.ignore = ignore
+        self.bip_status = bip_status
+
 def ping_to_client(ping):
     '''
     converts a ping consisting of a dict of the users attributes, into a new
@@ -286,7 +362,7 @@ def ping_to_client(ping):
 
     Placeholder
     '''
-    client = Client(HostType = 'server')
+    client = Client()
     client._update(ping)
 
     return client
