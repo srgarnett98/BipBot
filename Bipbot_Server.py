@@ -135,12 +135,12 @@ class bipBot(discord.Client):
 
     async def on_group_join(self, channel, user):
         bip_status = bipCheck(channel)
-        transmit(bip_status.__dict__)
+        transmit(bip_status)
         return
 
     async def on_group_leave(self, channel, user):
         bip_status = bipCheck(channel)
-        transmit(bip_status.__dict__)
+        transmit(bip_status)
         return
 
     async def every_5_mins(self):
@@ -148,7 +148,7 @@ class bipBot(discord.Client):
         for guild in self.guilds:
             for channel in guild.voice_channels:
                 bip_status = bipCheck(channel)
-                transmit(bip_status.__dict__)
+                transmit(bip_status)
         return
 
     async def on_ready(self):

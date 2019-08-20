@@ -1,11 +1,15 @@
 import PyQt5
 from PyQt5.QtCore import(
 QLine,
-QRect
+QRect,
+QEvent,
+Qt
 )
 from PyQt5.QtWidgets import(
 QApplication,
 QWidget,
+QMainWindow,
+QSystemTrayIcon,
 QErrorMessage,
 QGridLayout,
 QLineEdit,
@@ -16,6 +20,7 @@ QPushButton
 )
 from PyQt5.QtGui import(
 QPixmap,
+QIcon,
 QIntValidator
 )
 import numpy as np
@@ -26,6 +31,7 @@ import socket
 import pickle
 import sys
 import asyncio
+import plyer
 
 from pyqt_custom_objects import(
 QPicButton
@@ -60,6 +66,24 @@ class SettingsWindow(QWidget):
         self._NotificationsButton.stateChanged.connect(self.notifications_click)
         grid.addWidget(self._NotificationsButton, 0, 2, 1, 1)
 
+        self._ExcludedChannelsLabel = QLabel()
+        self._ExcludedChannelsLabel.setText('Shit-tier games')
+        grid.addWidget(self._ExcludedChannelsLabel, 1, 0, 1, 2)
+
+        self._ExcludedGamesList = QComboBox()
+        self._ExcludedGamesList.setEditable(True)
+        grid.addWidget(self._ExcludedGamesList, 1, 2, 1, 2)
+
+        self._ExcludedGamesAdd = QPushButton()
+        self._ExcludedGamesAdd.setText('Add')
+        self._ExcludedGamesAdd.clicked.connect(self.add_game_exclude)
+        grid.addWidget(self._ExcludedGamesAdd, 2, 2, 1, 1)
+
+        self._ExcludedGamesRemove = QPushButton()
+        self._ExcludedGamesRemove.setText('Remove')
+        self._ExcludedGamesRemove.clicked.connect(self.remove_game_exclude)
+        grid.addWidget(self._ExcludedGamesRemove, 2, 3, 1, 1)
+
 
         self.setWindowTitle('Preferences')
         self.setGeometry(300, 100, 300, 300)
@@ -69,7 +93,25 @@ class SettingsWindow(QWidget):
 
     def update(self):
         self._NotificationsButton.setChecked(self.User.notifications)
+        self._ExcludedGamesList.addItem('')
+        for item in self.User.excluded_games:
+            self._ExcludedGamesList.addItem(item)
 
+    def add_game_exclude(self):
+        if not str(self._ExcludedGamesList.currentText()) == '':
+            self._ExcludedGamesList.addItem(str(self._ExcludedGamesList.currentText()))
+            self.User.excluded_games.append(str(self._ExcludedGamesList.currentText()))
+            self.User.save_to_file()
+        return
+
+    def remove_game_exclude(self):
+        index = self._ExcludedGamesList.currentIndex()
+        if not str(self._ExcludedGamesList.currentText()) == '':
+            item_string = str(self._ExcludedGamesList.currentText())
+            self._ExcludedGamesList.removeItem(index)
+            self.User.excluded_games.remove(item_string)
+            self.User.save_to_file()
+        return
 
     def notifications_click(self):
         self.User.notifications = self._NotificationsButton.isChecked()
@@ -93,9 +135,24 @@ class BipApp(QWidget):
         self.initUI()
         self.set_default_states()
 
-        self.connection = Connection(self.User)
+        self.connection = Connection(self.User, self.loop)
 
     def initUI(self):
+
+        self._TaskbarIcon = QIcon()
+        self._TaskbarIcon.addPixmap(QPixmap('TaskbarRedIcon.png'), QIcon.Normal)
+        self._TaskbarIcon.addPixmap(QPixmap('TaskbarAmberIcon.png'), QIcon.Disabled)
+        self._TaskbarIcon.addPixmap(QPixmap('TaskbarGreenIcon.png'), QIcon.Active)
+        self._TaskbarIcon.addPixmap(QPixmap('TaskbarBlueIcon.png'), QIcon.Selected)
+        self.setWindowIcon(self._TaskbarIcon)
+
+        self._TrayIcon = QIcon()
+        self._TrayIcon.addPixmap(QPixmap('TrayRedIcon.png'), QIcon.Normal)
+        self._TrayIcon.addPixmap(QPixmap('TrayAmberIcon.png'), QIcon.Disabled)
+        self._TrayIcon.addPixmap(QPixmap('TrayGreenIcon.png'), QIcon.Active)
+        self._TrayIcon.addPixmap(QPixmap('TrayBlueIcon.png'), QIcon.Selected)
+        self._Tray = QSystemTrayIcon(self._TrayIcon, self)
+        self._Tray.show()
 
         grid = QGridLayout()
         grid.setVerticalSpacing(30)
@@ -303,13 +360,19 @@ class BipApp(QWidget):
             pass
         return
 
+    def changeEvent(self, event):
+        if event.type() == QEvent.WindowStateChange:
+            if self.windowState() & Qt.WindowMinimized:
+                self.hide()
+        QWidget.changeEvent(self, event)
 
 class Connection(object):
-    def __init__(self, User):
+    def __init__(self, User, loop):
         self.server = Server_props()
         self.server.IP = '127.0.0.1'
         self.server.port = 65019
         self.User = User
+        self.loop = loop
         self.start_socket()
 
     def start_socket(self):
@@ -321,7 +384,6 @@ class Connection(object):
         self.socket.connect((self.server.IP,
                              self.server.port))
 
-        print(self.User.__dict__)
         self.send_client_status()
 
         ping_size = self.socket.recv(8)
@@ -394,9 +456,11 @@ class Connection(object):
         type = ping.pop('type')
 
         if type == 'bip_status':
-            if (ping['channel_id'] in self.User.channels and
-                    not self.User.channels[ping['channel_id']][4]):
-                self.bip
+            channel_id = ping['bip'].channel_id
+            if (channel_id in self.User.channels and
+                    not self.User.channels[channel_id].ignore):
+                check_for_bip(self.User, ping['bip'])
+                self.User.channels[channel_id].bip_status = ping['bip']
 
 class Channel(BaseClass):
     def __init__(self,
@@ -418,18 +482,7 @@ class Channel(BaseClass):
 
 class Client(BaseClass):
     '''
-    A struct containing all the relevant details of a client. If the host is a
-    server, will also contain what game they are playing, and when they were added.
-
-    Time added is for the future, when the bot contains a list of past users and
-    such so i can collect data on all my friends. WHEN I DO THIS I WILL WORK BY
-    GDPR LAWS AND ASK FOR CONSENT DW
-
-    params:
-    -------
-
-        HostType: 'client' or 'server'
-            If hosttype is server, adds gamestate and time_added as attributes
+    A struct containing all the relevant details of a client.
 
     Attributes:
     -------
@@ -440,7 +493,7 @@ class Client(BaseClass):
         excluded_games: list of string
             A list of which games the user doesnt want to recieve bips about
 
-        channels: dict of dict (name : string, guild id : int)
+        channels: dict of Channel obj
             Dict index is the channel id
 
         guilds: dict of strings
@@ -458,14 +511,6 @@ class Client(BaseClass):
 
         port: int
             The port to which the client is on. Dont know if i need this
-
-        IF HOSTTYPE = 'SERVER':
-
-        gamestate: string
-            The game which the user is playing. WARNING: spotify may fuck this
-
-        time_added: float
-            time which the user was added to the server, for database uses.
         '''
     def __init__(self):
         super().__init__()
@@ -492,6 +537,27 @@ class Client(BaseClass):
             pickle.dump(self, fp)
         return
 
+def check_for_bip(User, bip_status):
+    channel_id = bip_status.channel_id
+    channel = User.channel[channel_id]
+    if not channel.ignore:
+        if len(bip_status.members) >= channel.big_req:
+            if User.notifications:
+                push_notification(bip_status)
+
+
+
+def push_notification(bip_status):
+    notification.notify(
+        title='New Bip',
+        message=('Bip in %s \n %d members, playing %s'.format(
+                  bip_status.channel,
+                  len(bip_status.members),
+                  bip_status.game
+                  ),
+        app_name='BipBot',
+        app_icon='TaskbarGreenIcon.png'
+    )
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
