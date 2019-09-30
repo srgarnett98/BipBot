@@ -126,29 +126,46 @@ class bipBot(discord.Client):
         self.listen_port = port
         self.loop.create_task(self.open_listen())
 
+        self.loop.create_task(self.every_5_mins())
 
-    def transmit(self, bip_status):
-        for user in self.connected:
-            if bip_status.channel in user.channels:
-                user.send_bip_status(bip_status)
+
+    def transmit(self, data, type):
+
+        if type == 'bip_status':
+            for c, connection in enumerate(self.connected):
+                connection_channel_ids = [channel for channel in connection.User.channels]
+                print(connection_channel_ids)
+                print(data.channel_id)
+                print(" ")
+                if data.channel_id in connection.User.channels:
+                    print("sending data")
+                    full_data = {'type': type,
+                                 'data': data}
+                    try:
+                        connection.send_data(full_data)
+                    except BrokenPipeError:
+                        connection.socket.close()
+                        self.connected.pop(c)
         return
 
     async def on_group_join(self, channel, user):
+        print('hello?')
         bip_status = bipCheck(channel)
-        transmit(bip_status)
+        self.transmit(bip_status, 'bip_status')
         return
 
     async def on_group_leave(self, channel, user):
         bip_status = bipCheck(channel)
-        transmit(bip_status)
+        self.transmit(bip_status, 'bip_status')
         return
 
     async def every_5_mins(self):
-        await asyncio.sleep(300)
-        for guild in self.guilds:
-            for channel in guild.voice_channels:
-                bip_status = bipCheck(channel)
-                transmit(bip_status)
+        while True:
+            for guild in self.guilds:
+                for channel in guild.voice_channels:
+                    bip_status = bipCheck(channel)
+                    self.transmit(bip_status, 'bip_status')
+            await asyncio.sleep(5)
         return
 
     async def on_ready(self):
@@ -307,10 +324,6 @@ class Client(BaseClass):
         notifications: bool
             If False, user will not recieve push notifications of bips
 
-        LFB: bool
-            Looking For Bip status. if enough people LFB then it will trigger a
-            bip alert
-
         IP: string formatted as IPV4
             The IP to which the client is on. Dont know if I need this
 
@@ -332,7 +345,6 @@ class Client(BaseClass):
         self.channels = []
         self.guilds = []
         self.notifications = True
-        self.LFB = False
         self.IP = None
         self.port = 65034
         self.gamestate = ""
@@ -370,7 +382,7 @@ def ping_to_client(ping):
 
 def main():
     try:
-        server = bipBot(port = 65019)
+        server = bipBot(port = 65022)
         with open('hash.txt', 'r') as file:
             bipbot_hash = file.readline().strip()
         server.run(bipbot_hash)

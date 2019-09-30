@@ -23,6 +23,7 @@ QPixmap,
 QIcon,
 QIntValidator
 )
+from quamash import QEventLoop
 import numpy as np
 import ipaddress
 import time
@@ -124,34 +125,25 @@ class BipApp(QWidget):
         super().__init__()
 
         self.User = Client()
-        self.bip_status = BipStatus(members = [],
-                                    game = None,
-                                    channel = None,
-                                    channel_id = None,
-                                    guild = None,
-                                    guild_id = None)
-        self.loop = asyncio.new_event_loop()
 
         self.initUI()
         self.set_default_states()
 
-        self.connection = Connection(self.User, self.loop)
+        print('test')
 
     def initUI(self):
 
-        self._TaskbarIcon = QIcon()
-        self._TaskbarIcon.addPixmap(QPixmap('TaskbarRedIcon.png'), QIcon.Normal)
-        self._TaskbarIcon.addPixmap(QPixmap('TaskbarAmberIcon.png'), QIcon.Disabled)
-        self._TaskbarIcon.addPixmap(QPixmap('TaskbarGreenIcon.png'), QIcon.Active)
-        self._TaskbarIcon.addPixmap(QPixmap('TaskbarBlueIcon.png'), QIcon.Selected)
-        self.setWindowIcon(self._TaskbarIcon)
+        self._TaskbarIconRed = QIcon('TaskbarIconRed.png')
+        self._TaskbarIconAmber = QIcon('TaskbarIconAmber.png')
+        self._TaskbarIconGreen = QIcon('TaskbarIconGreen.png')
+        self._TaskbarIconBlue = QIcon('TaskbarIconBlue.png')
+        self.setWindowIcon(self._TaskbarIconBlue)
 
-        self._TrayIcon = QIcon()
-        self._TrayIcon.addPixmap(QPixmap('TrayRedIcon.png'), QIcon.Normal)
-        self._TrayIcon.addPixmap(QPixmap('TrayAmberIcon.png'), QIcon.Disabled)
-        self._TrayIcon.addPixmap(QPixmap('TrayGreenIcon.png'), QIcon.Active)
-        self._TrayIcon.addPixmap(QPixmap('TrayBlueIcon.png'), QIcon.Selected)
-        self._Tray = QSystemTrayIcon(self._TrayIcon, self)
+        self._TrayIconRed = QIcon('TrayIconRed.png')
+        self._TrayIconAmber = QIcon('TrayIconAmber.png')
+        self._TrayIconGreen = QIcon('TrayIconGreen.png')
+        self._TrayIconBlue = QIcon('TrayIconBlue.png')
+        self._Tray = QSystemTrayIcon(self._TrayIconBlue, self)
         self._Tray.show()
 
         grid = QGridLayout()
@@ -171,14 +163,6 @@ class BipApp(QWidget):
         self._NameArea.setPlaceholderText('Name')
         self._NameArea.textChanged.connect(self.update_name)
         grid.addWidget(self._NameArea, 1, 0, 1, 4)
-
-        self._LfbTooltip = QLabel()
-        self._LfbTooltip.setText('LFB')
-        grid.addWidget(self._LfbTooltip, 1, 8, 1, 2)
-
-        self._LfbBox = QCheckBox()
-        self._LfbBox.stateChanged.connect(self.LFB_press)
-        grid.addWidget(self._LfbBox, 1, 10, 1, 2)
 
         self._GuildsDrop = QComboBox()
         self._GuildsDrop.currentIndexChanged.connect(self.show_channels_of_guild,
@@ -255,20 +239,15 @@ class BipApp(QWidget):
         #self.setGeometry(300, 300, 300, 220)
         self.setWindowTitle('BipApp')
 
-        self.show()
+        #self.show()
 
     def set_default_states(self):
         self.User.load_from_file()
 
         self._NameArea.setText(self.User.name)
-        self._LfbBox.setChecked(False)
         self.update_listed_guilds()
         self.show_channels_of_guild(self._GuildsDrop.currentIndex())
         self._Settings.update()
-
-    def LFB_press(self):
-        self.User.LFB = self._LfbBox.isChecked()
-        return
 
     def update_name(self):
         self.User.name = self._NameArea.text()
@@ -283,7 +262,7 @@ class BipApp(QWidget):
             error_dialog.showMessage('Guild id must be int. Try $guildID in the required discord text channel')
             error_dialog.exec()
             return
-        self.connection.request_guild_channel_ids(int(self._NewGuildArea.text()))
+        self.request_guild_channel_ids(int(self._NewGuildArea.text()))
         self.update_listed_guilds()
         self.User.save_to_file()
         return
@@ -366,14 +345,46 @@ class BipApp(QWidget):
                 self.hide()
         QWidget.changeEvent(self, event)
 
-class Connection(object):
-    def __init__(self, User, loop):
+    def set_icon_colour(self):
+        #colours = ['red', 'amber', 'green']
+        most_active_state = 0
+        for id, channel in self.User.channels.items():
+            if len(channel.members) >= channel.big_req:
+                most_active_state = max(most_active_state,
+                                        2)
+            elif len(channel.members) >= channel.smol_req:
+                most_active_state = max(most_active_state,
+                                        1)
+
+        if most_active_state == 0:
+            self.setWindowIcon(self._TaskbarIconRed)
+            self._TrayIcon.setIcon(self._TrayIconRed)
+        elif most_active_state == 1:
+            self.setWindowIcon(self._TaskbarIconAmber)
+            self._TrayIcon.setIcon(self._TrayIconAmber)
+        elif most_active_state == 2:
+            self.setWindowIcon(self._TaskbarIconGreen)
+            self._TrayIcon.setIcon(self._TrayIconGreen)
+
+        return
+
+class Connection(BipApp):
+    def __init__(self, loop):
+        super().__init__()
+        self.loop = loop
         self.server = Server_props()
         self.server.IP = '127.0.0.1'
-        self.server.port = 65019
-        self.User = User
-        self.loop = loop
-        self.start_socket()
+        self.server.port = 65022
+
+        try:
+            self.start_socket()
+        except ConnectionRefusedError:
+            print('Cannot reach server')
+            self.try_socket_intermittent()
+
+            pass
+
+        self.show()
 
     def start_socket(self):
         '''
@@ -389,6 +400,8 @@ class Connection(object):
         ping_size = self.socket.recv(8)
         ping_size = int.from_bytes(ping_size, byteorder = 'big')
         ready = pickle.loads(self.socket.recv(ping_size))
+
+        self.loop.create_task(self.recieve_server_ping())
 
         if ready == 'ready':
             print('ready')
@@ -411,7 +424,6 @@ class Connection(object):
     def request_guild_channel_ids(self, guild_id):
         data = {'get_channels_of_guild': guild_id}
         self.send_data(data)
-
         ping_size = self.socket.recv(8)
         ping_size = int.from_bytes(ping_size, byteorder = 'big')
         voice_ids = pickle.loads(self.socket.recv(ping_size))
@@ -440,27 +452,50 @@ class Connection(object):
 
     async def recieve_server_ping(self):
         try:
+            self.socket.setblocking(False)
             ping_size = await self.loop.sock_recv(self.socket, 8)
-            ping_size = int.from_bytes(ping_size, byteorder = 'little')
+            ping_size = int.from_bytes(ping_size, byteorder = 'big')
             server_ping = await self.loop.sock_recv(self.socket, ping_size)
             server_ping = pickle.loads(server_ping)
-            self.process_ping(self, server_ping)
+            self.process_ping(server_ping)
         except Exception:
+            import traceback as tb
+            tb.print_exc()
             print('Connection closed')
+            self.loop.create_task(self.try_socket_intermittent())
         finally:
             return
-
-        self.show()
 
     def process_ping(self, ping):
         type = ping.pop('type')
 
         if type == 'bip_status':
-            channel_id = ping['bip'].channel_id
+            print("bip_status recieved")
+            channel_id = ping['data'].channel_id
             if (channel_id in self.User.channels and
                     not self.User.channels[channel_id].ignore):
-                check_for_bip(self.User, ping['bip'])
-                self.User.channels[channel_id].bip_status = ping['bip']
+                self.check_for_bip(self.User, ping['data'])
+                self.User.channels[channel_id].bip_status = ping['data']
+
+
+    def check_for_bip(self, User, bip_status):
+        channel_id = bip_status.channel_id
+        channel = User.channels[channel_id]
+        if not channel.ignore:
+            if len(bip_status.members) >= channel.big_req:
+                if User.notifications:
+                    push_notification(bip_status)
+        channel.bip_status = bip_status
+        self.set_icon_colour()
+
+    async def try_socket_intermittent(self):
+        while True:
+            try:
+                self.start_socket()
+                return
+            except:
+                pass
+            await asyncio.sleep(60)
 
 class Channel(BaseClass):
     def __init__(self,
@@ -502,16 +537,13 @@ class Client(BaseClass):
         notifications: bool
             If False, user will not recieve push notifications of bips
 
-        LFB: bool
-            Looking For Bip status. if enough people LFB then it will trigger a
-            bip alert
-
         IP: string formatted as IPV4
             The IP to which the client is on. Dont know if I need this
 
         port: int
             The port to which the client is on. Dont know if i need this
-        '''
+    '''
+
     def __init__(self):
         super().__init__()
         self.name = ""
@@ -519,7 +551,6 @@ class Client(BaseClass):
         self.channels = {}
         self.guilds = {}
         self.notifications = True
-        self.LFB = False
         self.IP = None
         self.port = 65034
 
@@ -537,16 +568,6 @@ class Client(BaseClass):
             pickle.dump(self, fp)
         return
 
-def check_for_bip(User, bip_status):
-    channel_id = bip_status.channel_id
-    channel = User.channel[channel_id]
-    if not channel.ignore:
-        if len(bip_status.members) >= channel.big_req:
-            if User.notifications:
-                push_notification(bip_status)
-
-
-
 def push_notification(bip_status):
     notification.notify(
         title='New Bip',
@@ -554,13 +575,15 @@ def push_notification(bip_status):
                   bip_status.channel,
                   len(bip_status.members),
                   bip_status.game
-                  ),
+                  )),
         app_name='BipBot',
         app_icon='TaskbarGreenIcon.png'
     )
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    gui = BipApp()
+    loop = QEventLoop(app)
+    asyncio.set_event_loop(loop)
+    gui = Connection(loop)
 
     sys.exit(app.exec_())

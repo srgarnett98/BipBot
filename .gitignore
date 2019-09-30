@@ -107,3 +107,4 @@ venv.bak/
 hash.txt
 config.json
 config.pickle
+image_template.png
