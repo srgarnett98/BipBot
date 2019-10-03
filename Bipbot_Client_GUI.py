@@ -349,22 +349,22 @@ class BipApp(QWidget):
         #colours = ['red', 'amber', 'green']
         most_active_state = 0
         for id, channel in self.User.channels.items():
-            if len(channel.members) >= channel.big_req:
+            if len(channel.bip_status.members) >= channel.big_req:
                 most_active_state = max(most_active_state,
                                         2)
-            elif len(channel.members) >= channel.smol_req:
+            elif len(channel.bip_status.members) >= channel.smol_req:
                 most_active_state = max(most_active_state,
                                         1)
 
         if most_active_state == 0:
             self.setWindowIcon(self._TaskbarIconRed)
-            self._TrayIcon.setIcon(self._TrayIconRed)
+            self._Tray.setIcon(self._TrayIconRed)
         elif most_active_state == 1:
             self.setWindowIcon(self._TaskbarIconAmber)
-            self._TrayIcon.setIcon(self._TrayIconAmber)
+            self._Tray.setIcon(self._TrayIconAmber)
         elif most_active_state == 2:
             self.setWindowIcon(self._TaskbarIconGreen)
-            self._TrayIcon.setIcon(self._TrayIconGreen)
+            self._Tray.setIcon(self._TrayIconGreen)
 
         return
 
@@ -451,20 +451,21 @@ class Connection(BipApp):
         return True
 
     async def recieve_server_ping(self):
-        try:
-            self.socket.setblocking(False)
-            ping_size = await self.loop.sock_recv(self.socket, 8)
-            ping_size = int.from_bytes(ping_size, byteorder = 'big')
-            server_ping = await self.loop.sock_recv(self.socket, ping_size)
-            server_ping = pickle.loads(server_ping)
-            self.process_ping(server_ping)
-        except Exception:
-            import traceback as tb
-            tb.print_exc()
-            print('Connection closed')
-            self.loop.create_task(self.try_socket_intermittent())
-        finally:
-            return
+        while True:
+            try:
+                self.socket.setblocking(False)
+                ping_size = await self.loop.sock_recv(self.socket, 8)
+                ping_size = int.from_bytes(ping_size, byteorder = 'big')
+                print(ping_size)
+                server_ping = await self.loop.sock_recv(self.socket, ping_size)
+                server_ping = pickle.loads(server_ping)
+                self.process_ping(server_ping)
+            except Exception:
+                import traceback as tb
+                tb.print_exc()
+                print('Connection closed')
+                self.loop.create_task(self.try_socket_intermittent())
+                return
 
     def process_ping(self, ping):
         type = ping.pop('type')
@@ -487,6 +488,7 @@ class Connection(BipApp):
                     push_notification(bip_status)
         channel.bip_status = bip_status
         self.set_icon_colour()
+        return
 
     async def try_socket_intermittent(self):
         while True:
